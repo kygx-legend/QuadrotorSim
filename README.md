@@ -5,8 +5,9 @@
 
 --- model  
 |  |--suzaku.mtl  
-|  `--suzaku.obj  
+|  |--suzaku.obj  
+|
 |--objloader.py  
 |--simulator.py  
-`--README.md  
+|--README.md  
 
