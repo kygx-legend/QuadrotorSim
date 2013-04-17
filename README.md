@@ -3,10 +3,10 @@
 
 ### file tree
 
-├── model
-│   ├── suzaku.mtl
-│   └── suzaku.obj
-├── objloader.py
-├─README.m
-└─simulator.p
+--- model  
+|  |--suzaku.mtl  
+|  `--suzaku.obj  
+|--objloader.py  
+|--simulator.py  
+`--README.md  
 
