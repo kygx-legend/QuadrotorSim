@@ -17,7 +17,8 @@ try:
     from pygame.constants import *
     from OpenGL.GL import *
     from OpenGL.GLU import *
-    from objloader import *
+    from obj import *
+    from camera import *
 except:
     print '=====> import error! please check'
 
@@ -30,94 +31,160 @@ class SimulatorApp(object):
     # Init Application
 
     def __init__(self):	
-        print '=====> Simulator App start...'
-        self._running = True
-        self._display_surf = None
-        self.viewpoint = (800, 600)
-        self.hx, self.hy = self.viewpoint[0] / 2, self.viewpoint[1] / 2
-
-        self.path, self.filename = './model/', 'suzaku.obj'
-
+        self.size = (640,480)
+        self.flags = OPENGL|DOUBLEBUF|HWSURFACE
+        self.clear_color = (1.,1.,1.,1.)
+        self.stop = False
+        self.dirty_camera = False
+        self.light_pos = [0,3,0,1]
+        self.light_ambient = [0,0,0,1]
+        self.light_diffuse = [.5,.5,.5,1]
+        self.light_specular = [.5,.5,.5,1]
+        self.last_mouse_pos = None
         self.clock = pygame.time.Clock()
-        self.rx, self.ry = (0,0)
-        self.tx, self.ty = (0,0)
-        self.zpos = 5
-        self.rotate = self.move = False
+        self.world = ode.World()
+        self.world.setGravity((0,-9.81,0))
+        self.world.setERP(0.8)
+        self.world.setCFM(1E-5)
+        self.space = ode.Space()
+        self.contact_group = ode.JointGroup()
+        self.floor = ode.GeomPlane(self.space, (0,1,0), 0)
+        self.camera = None
+        print '=====> Simulator App start...'
 
-    def on_init(self):
+    def start(self):
+        self.init()
+        self.load_camera()
+        self.load_obj()
+        self.initGL()
+        self.set_light()
+        self.run()
+        self.finish()
+
+    def init(self):
         pygame.init()
-        self._display_surf = pygame.display.set_mode(self.viewpoint, OPENGL | DOUBLEBUF)
-        self._running = True
+        self.screen = pygame.display.set_mode(self.size,self.flags)
 
-        glLightfv(GL_LIGHT0, GL_POSITION,  (-40, 200, 100, 0.0))
-        glLightfv(GL_LIGHT0, GL_AMBIENT, (0.2, 0.2, 0.2, 1.0))
-        glLightfv(GL_LIGHT0, GL_DIFFUSE, (0.5, 0.5, 0.5, 1.0))
-        glEnable(GL_LIGHT0)
+    def load_camera(self):
+        self.camera = Camera([0,4,0],[0,4,-.1],[0,1,0],[0,0],self.world,
+                             self.space, (90, float(self.size[0])/self.size[1], .1,100))
+
+    def load_obj(self):
+        self.obj = OBJ('./model/', 'suzaku.obj', None, None)
+
+    def initGL(self):
+        glViewport(0,0,640,480)
+        self.move_camera()
+        glClearColor(*self.clear_color)
+        glEnable(GL_DEPTH_TEST)
+        glShadeModel(GL_SMOOTH)
         glEnable(GL_LIGHTING)
         glEnable(GL_COLOR_MATERIAL)
-        glEnable(GL_DEPTH_TEST)
-        glShadeModel(GL_SMOOTH)           # most obj files expect to be smooth-shaded
+        glEnable(GL_NORMALIZE)
+        glMaterial(GL_FRONT, GL_AMBIENT, (.1,.1,.1,1))
+        glMaterial(GL_FRONT, GL_DIFFUSE, (1,1,1,1))
+        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL)
+        glEnable(GL_POLYGON_SMOOTH)
+        glEnable(GL_BLEND)
 
-        self.obj = OBJ(self.path, self.filename, swapyz=True)
+    def set_light(self):
+        glEnable(GL_LIGHT0)
+        glLightfv(GL_LIGHT0, GL_POSITION, self.camera.get_position())
+        glLightfv(GL_LIGHT0, GL_AMBIENT, self.light_ambient)
+        glLightfv(GL_LIGHT0, GL_DIFFUSE, self.light_diffuse)
+        glLightfv(GL_LIGHT0, GL_SPECULAR, self.light_specular)
 
-        glMatrixMode(GL_PROJECTION)
-        glLoadIdentity()
-        width, height = self.viewpoint
-        gluPerspective(90.0, width/float(height), 1, 100.0)
-        glEnable(GL_DEPTH_TEST)
-        glMatrixMode(GL_MODELVIEW)
+    def call_lists(self):
+        self.obj.callList()
 
-    def on_event(self, e):
-        if e.type == pygame.QUIT:
-            self._running = False
-        elif e.type == KEYDOWN and e.key == K_ESCAPE:
-            sys.exit()
-        elif e.type == MOUSEBUTTONDOWN:
-            if e.button == 4: self.zpos = max(1, self.zpos-1)
-            elif e.button == 5: self.zpos += 1
-            elif e.button == 1: self.rotate = True
-            elif e.button == 3: self.move = True
-        elif e.type == MOUSEBUTTONUP:
-            if e.button == 1: self.rotate = False
-            elif e.button == 3: self.move = False
-        elif e.type == MOUSEMOTION:
-            i, j = e.rel
-            if self.rotate:
-                self.rx += i
-                self.ry += j
-            if self.move:
-                self.tx += i
-                self.ty -= j
+    def handle_events(self, events):
+        for event in events:
+            if event.type == QUIT:
+                self.end()
+            if event.type == MOUSEBUTTONDOWN:
+                if event.button == 1:
+                    self.last_mouse_pos = pygame.mouse.get_pos()
+                    pygame.mouse.set_visible(False)
+            if event.type == MOUSEBUTTONUP:
+                if event.button == 1:
+                    self.last_mouse_pos = None
+                    pygame.mouse.set_visible(True)
+            if event.type == MOUSEMOTION:
+                if self.last_mouse_pos is not None: self.handle_mouse()
 
-    def on_loop(self):
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
-        glLoadIdentity()
+    def move_camera(self):
+        self.dirty_camera = False
+        self.camera.update()
+        glLightfv(GL_LIGHT0, GL_POSITION, self.camera.get_position())
 
-    def on_render(self):
-        glTranslate(self.tx/20., self.ty/20., - self.zpos)
-        glRotate(self.ry, 1, 0, 0)
-        glRotate(self.rx, 0, 1, 0)
-        glCallList(self.obj.gl_list)
-     
+    def move(self, m_x, m_y, m_z):
+        self.camera.move(m_x,m_y,m_z)
+
+    def handle_keys(self, keys):
+        if keys[K_COMMA] or keys[K_a] or \
+                keys[K_o] or keys[K_e] or \
+                keys[K_SPACE] or keys[K_LSHIFT]:
+            self.dirty_camera = True
+        if keys[K_w]:
+            self.move(0,0,-10)
+        if keys[K_a]:
+            self.move(-10,0,0)
+        if keys[K_d]:
+            self.move(10,0,0)
+        if keys[K_s]:
+            self.move(0,0,10)
+        if keys[K_e]:
+            self.move(0,-10,0)
+        if keys[K_SPACE]:
+            self.move(0,50,0)
+
+    def clear_screen(self):
+        glClear(GL_DEPTH_BUFFER_BIT|GL_COLOR_BUFFER_BIT)
+
+    def update_screen(self):
         pygame.display.flip()
 
-    def on_cleanup(self):
+    def sync(self):
+        glFinish()
+
+    def handle_camera(self):
+        self.move_camera()
+
+    def handle_world(self):
+        self.space.collide((self.world,self.contact_group), self.camera.collide)
+        self.world.step(1/60.)
+        self.contact_group.empty()
+
+    def handle_mouse(self):
+        mouse_pos = pygame.mouse.get_pos()
+        diff = [(self.last_mouse_pos[x]-mouse_pos[x])/3. for x in range(2)]
+        self.camera.rotate(*diff)
+        self.dirty_camera = True
+        pygame.mouse.set_pos(self.last_mouse_pos)
+
+    def run(self):
+        while not self.stop:
+            self.clock.tick()
+            self.handle_events(pygame.event.get())
+            self.handle_keys(pygame.key.get_pressed())
+            self.handle_world()
+            self.handle_camera()
+            self.clear_screen()
+            self.call_lists()
+            self.update_screen()
+            self.sync()
+
+    def end(self):
+        self.stop = True
+
+    def finish(self):
+        print self.clock.get_fps()
         pygame.quit()
 
-    def on_execute(self):
-        if self.on_init() == False:
-            self._running = False
-
-        while( self._running ):
-            self.clock.tick(FPS)
-            for event in pygame.event.get():
-                self.on_event(event)
-                self.on_loop()
-                self.on_render()
 
 
 #----mainloop----
 if __name__ == '__main__':   
 
     theApp = SimulatorApp()
-    theApp.on_execute()
+    theApp.start()

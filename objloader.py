@@ -9,8 +9,13 @@
     E-mail: legendlee1314@gmail.com
 """
 
-import pygame
-from OpenGL.GL import *
+# try to import
+
+try:
+    import pygame
+    from OpenGL.GL import *
+except:
+    print '=====> import error! please check'
 
 # load mtl file for setting materials
 
@@ -46,7 +51,9 @@ def MTL(filename):
             mtl[values[0]] = map(float, values[1:])
     return contents
 
-class OBJ(object):
+# OBJ loader
+
+class OBJloader(object):
 
     """
         Loads a Wavefront OBJ file. 
@@ -58,6 +65,7 @@ class OBJ(object):
         self.texcoords = []
         self.faces = []
         self.load(path, filename, swapyz)
+        self.genGLlists()
 
     def load(self, path, filename, swapyz=False):
         """
@@ -104,8 +112,6 @@ class OBJ(object):
                         norms.append(0)
                 self.faces.append((face, norms, texcoords, material))
 
-        self.genGLlists()
-
     def genGLlists(self):
         """
             draw the object of file
@@ -136,8 +142,9 @@ class OBJ(object):
         glDisable(GL_TEXTURE_2D)
         glEndList()
 
+    def getGLlists(self):
+        return self.gl_list
+
 
 if __name__ == '__main__':   
-    obj = OBJ()
-    obj.load('./model/', 'suzaku.obj')
-    obj.genGLlists()
+    obj = OBJloader('./model/', 'suzaku.obj')
